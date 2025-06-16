@@ -54,4 +54,4 @@ jobs:
         author-email: 'actions@github.com'
         author-name: 'GitHub Actions'
         commit-message: 'update articles'
-        token: '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'
+        token: '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'
