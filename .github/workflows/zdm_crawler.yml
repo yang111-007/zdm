@@ -2,7 +2,7 @@ name: zdm_crawler
 
 on:
   schedule:
-    - cron: "*/30 * * * *"
+    - cron: "0 * * * *"
   workflow_dispatch:
     inputs:
       should_commit:
