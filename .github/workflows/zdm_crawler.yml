@@ -1,5 +1,4 @@
 name: zdm_crawler
-
 on:
   schedule:
     - cron: "0 * * * *"
@@ -9,32 +8,28 @@ on:
         description: '立即生成提交记录'
         type: boolean
         default: False
-
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4  # 升级 v4，修复警告
-
     - name: Set up JDK
       uses: actions/setup-java@v4  # 升级 v4，修复警告
       with:
         java-version: '11'
         distribution: 'temurin'
         cache: maven
-
     # ✅ 自动安装 Chrome + ChromeDriver（彻底修复404）
     - name: Setup Chrome and ChromeDriver
       uses: browser-actions/setup-chrome@v1
-
     # 将上次运行的缓存文件覆盖到本地
     - name: database cache restore
       uses: actions/cache@v4
       with:
         path: database_old.db
-        key: ${{ runner.os }}-database_old-${{ github.run_number }}
-        restore-keys: ${{ runner.os }}-database_old-
-
+        # 【已修复】固定缓存key，不带run_number，可以复用数据库
+        key: ${{ runner.os }}-zdm-db
+        restore-keys: ${{ runner.os }}-zdm-db
     - name: database cache copy
       id: db_copy
       run: |
@@ -47,13 +42,11 @@ jobs:
         if [ -f database_old.db ]; then
           cp database_old.db database.db
         fi
-
     # 打包项目
     - name: Build with Maven
       run: |
         mvn package
         cp ./target/zdm-0.0.1.jar ./zdm.jar
-
     - name: main logic
       env:
         maxPageSize: 10
@@ -67,7 +60,6 @@ jobs:
         spt: ${{secrets.spt}}
         detail: false
       run: java -jar zdm.jar
-
     # 检查数据库中新增行数是否超过提交阈值
     - name: check database changes
       id: commit_check
@@ -82,13 +74,11 @@ jobs:
           echo "should_commit=true" >> $GITHUB_OUTPUT
         fi
         cp database.db database_old.db
-
     # 保存已推送和暂未推送的优惠信息
     - name: git add files
       if: steps.commit_check.outputs.should_commit == 'true' || inputs.should_commit == 'true'
       run: |
         git add database.db
-
     - name: commit & push
       if: steps.commit_check.outputs.should_commit == 'true' || inputs.should_commit == 'true'
       uses: actions-go/push@master
