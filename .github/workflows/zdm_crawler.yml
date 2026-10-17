@@ -12,29 +12,26 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4  # 升级 v4，修复警告
+    - uses: actions/checkout@v4
     - name: Set up JDK
-      uses: actions/setup-java@v4  # 升级 v4，修复警告
+      uses: actions/setup-java@v4
       with:
         java-version: '11'
         distribution: 'temurin'
         cache: maven
-    # ✅ 自动安装 Chrome + ChromeDriver（彻底修复404）
     - name: Setup Chrome and ChromeDriver
       uses: browser-actions/setup-chrome@v1
-    # 将上次运行的缓存文件覆盖到本地
     - name: database cache restore
       uses: actions/cache@v4
       with:
         path: database_old.db
-        # 【已修复】固定缓存key，不带run_number，可以复用数据库
         key: ${{ runner.os }}-zdm-db
         restore-keys: ${{ runner.os }}-zdm-db
     - name: database cache copy
       id: db_copy
       run: |
         if [ -f database.db ]; then
-          LAST_COUNT=$(sqlite3 database.db "SELECT COUNT(*) FROM ZDM;")
+          LAST_COUNT=$(sqlite3 database.db "SELECT COUNT(*) FROM article;")
         else
           LAST_COUNT=0
         fi
@@ -42,48 +39,59 @@ jobs:
         if [ -f database_old.db ]; then
           cp database_old.db database.db
         fi
-    # 打包项目
     - name: Build with Maven
       run: |
         mvn package
-        cp ./target/zdm-0.0.1.jar ./zdm.jar
+        cp target/*.jar app.jar
     - name: main logic
       env:
         maxPageSize: 10
         minVoted: 5
-        minComments: 5
+        minComment:5
         MIN_PUSH_SIZE: 50
         emailHost: smtp.qq.com
         emailPort: 465
-        emailAccount: 599764916@qq.com
-        emailPassword: noyvztdrzkhobccb
-        spt: ${{secrets.spt}}
+        emailUser: 59976491@qq.com
+        emailPassword: ${{secrets.spt}}
         detail: false
-      run: java -jar zdm.jar
-    # 检查数据库中新增行数是否超过提交阈值
+      run: java -jar app.jar
     - name: check database changes
       id: commit_check
       env:
         COMMIT_THRESHOLD: 50
       run: |
-        LAST_COUNT=${{ steps.db_copy.outputs.last_count }}
-        CURRENT_COUNT=$(sqlite3 database.db "SELECT COUNT(*) FROM ZDM;")
-        NEW_ROWS=$((CURRENT_COUNT - LAST_COUNT))
-        echo "Last count: $LAST_COUNT , Current count: $CURRENT_COUNT , New rows: $NEW_ROWS"
+        CURRENT_COUNT=$(sqlite3 database.db "SELECT COUNT(*) FROM article;")
+        NEW_ROWS=$((CURRENT_COUNT - ${{steps.db_copy.outputs.last_count}}))
+        echo "Last count: ${{steps.db_copy.outputs.last_count}}, Current count: $CURRENT_COUNT, New rows: $NEW_ROWS"
         if [ $NEW_ROWS -ge $COMMIT_THRESHOLD ]; then
           echo "should_commit=true" >> $GITHUB_OUTPUT
         fi
         cp database.db database_old.db
-    # 保存已推送和暂未推送的优惠信息
     - name: git add files
-      if: steps.commit_check.outputs.should_commit == 'true' || inputs.should_commit == 'true'
+      if: steps.commit_check.outputs.should_commit == 'true' || inputs.should_commit == true
       run: |
+        git config --global user.name "GitHub Actions"
+        git config --global user.email "actions@github.com"
         git add database.db
     - name: commit & push
-      if: steps.commit_check.outputs.should_commit == 'true' || inputs.should_commit == 'true'
+      if: steps.commit_check.outputs.should_commit == 'true' || inputs.should_commit == true
       uses: actions-go/push@master
       with:
         author-email: 'actions@github.com'
         author-name: 'GitHub Actions'
         commit-message: 'update articles'
-        token: ${{secrets.GIT_TOKEN}}
+        token: ${{ secrets.GIT_TOKEN }}
+  # 保活任务，每次定时运行自动空提交，防止60天冻结
+  keepalive:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Keepalive commit
+        env:
+          GIT_TOKEN: ${{ secrets.GIT_TOKEN }}
+        run: |
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+          git commit --allow-empty -m "keepalive: prevent schedule disable"
+          git push https://${GIT_TOKEN}@github.com/${{ github.repository }}.git
